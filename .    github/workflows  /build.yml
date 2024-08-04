@@ -1,0 +1,119 @@
+name: Build
+
+on: [push, pull_request, workflow_dispatch]
+  
+env:
+  PROJECT_NAME: "vphysics"
+  BUILD_64x: "true"
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    container: debian:bullseye
+    steps:
+    - name: Install Dependencies
+      run: |
+        dpkg --add-architecture i386
+        apt update
+        apt install -y build-essential git libstdc++6:i386 gcc-multilib g++-multilib wget
+    
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+        
+    - name: Install Premake
+      run: |
+        wget https://github.com/danielga/garrysmod_common/releases/download/premake-build%2F5.0.0-beta2/premake-5.0.0-beta2-linux.tar.gz -O premake.tar.gz
+        tar -xvf premake.tar.gz --directory=/usr/bin
+        gcc --version
+
+    - name: Generate Project
+      run: |
+        premake5 gmake2
+
+    - name: Make
+      run: |
+        cd sourcesdk-minimal/projects/linux/gmake2
+        for FILE in `find *.make -type f`
+        do
+            make -f $FILE
+        done
+
+        cd ../../../../ivp/projects/linux/gmake2
+        make -f ivp_compact_builder.make
+        make -f havana_constraints.make
+        make -f ivp_physics.make
+        make -f hk_math.make
+        make -f hk_base.make
+
+        cd ../../../../projects/linux/gmake2
+        make -j -f interfaces.make
+        make -j -f vphysics.make
+
+    - name: Make 64x
+      if: env.BUILD_64x == 'true'
+      run: |
+        cd sourcesdk-minimal/projects/linux/gmake2
+        for FILE in `find *.make -type f`
+        do
+            make -f $FILE config=debug_x86_64
+        done
+
+        cd ../../../../ivp/projects/linux/gmake2
+        make -f ivp_compact_builder.make config=debug_x86_64
+        make -f havana_constraints.make config=debug_x86_64
+        make -f ivp_physics.make config=debug_x86_64
+        make -f hk_math.make config=debug_x86_64
+        make -f hk_base.make config=debug_x86_64
+
+        cd ../../../../projects/linux/gmake2
+        make -j -f interfaces.make config=debug_x86_64
+        make -j -f vphysics.make config=debug_x86_64
+
+    - uses: actions/upload-artifact@v2
+      with:
+        name: ${{env.PROJECT_NAME}}_linux.so
+        path: projects/linux/gmake2/x86/Debug/${{env.PROJECT_NAME}}.so
+
+    - uses: actions/upload-artifact@v2
+      if: env.BUILD_64x == 'true'
+      with:
+        name: ${{env.PROJECT_NAME}}_linux64.so
+        path: projects/linux/gmake2/x86_64/Debug/${{env.PROJECT_NAME}}.so
+  build-windows:
+    runs-on: windows-2019
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+
+    - name: Install Premake
+      run: |
+         curl -L https://github.com/danielga/garrysmod_common/releases/download/premake-build%2F5.0.0-beta2/premake-5.0.0-beta2-windows.zip -o premake.zip
+         tar -xf premake.zip
+
+    - name: Generate Project
+      run: |
+        ./premake5.exe vs2019
+
+    - name: Build
+      run: |
+        cd projects/windows/vs2019
+        & "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\MSBuild\Current\Bin\msbuild.exe" /p:Configuration=ReleaseWithSymbols /p:Platform=Win32 ${{env.PROJECT_NAME}}.vcxproj
+
+    - name: Build 64x
+      if: env.BUILD_64x == 'true'
+      run: |
+        cd projects/windows/vs2019
+        & "C:\Program Files (x86)\Microsoft Visual Studio\2019\Enterprise\MSBuild\Current\Bin\msbuild.exe" /p:Configuration=ReleaseWithSymbols /p:Platform=x64 ${{env.PROJECT_NAME}}.vcxproj
+
+    - uses: actions/upload-artifact@v2
+      with:
+        name: ${{env.PROJECT_NAME}}_win.dll
+        path: projects/windows/vs2019/x86/ReleaseWithSymbols/${{env.PROJECT_NAME}}.dll
+
+    - uses: actions/upload-artifact@v2
+      if: env.BUILD_64x == 'true'
+      with:
+        name: ${{env.PROJECT_NAME}}_win64.dll
+        path: projects/windows/vs2019/x86_64/ReleaseWithSymbols/${{env.PROJECT_NAME}}.dll
